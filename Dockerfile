@@ -2,7 +2,7 @@
 # Do not use this as a real deployment Dockerfile.
 
 # 1. Old, known-vulnerable base image
-FROM node:14
+FROM node:24.18.0
 
 # 2. Hardcoded secret baked into the image layer
 ENV API_SECRET="sk_live_51H8xJ2kQwErTyUiOpAsDfGhJkLzXcVbNm"

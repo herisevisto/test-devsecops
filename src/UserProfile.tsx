@@ -1,9 +1,12 @@
 import React, { useState } from "react";
+import DOMPurify from "dompurify";
 
-// --- Intentional SAST issues below, for scanner testing only ---
+// --- Fixed version: all six issues from the original file remediated ---
 
-// 1. Hardcoded secret (should trigger hardcoded-secret detection)
-const API_KEY = "sk_live_51H8xJ2kQwErTyUiOpAsDfGhJkLzXcVbNm";
+// 1. FIXED: no hardcoded secret. Read from environment/config at runtime,
+// injected by your deployment platform (e.g. Vercel env vars), never
+// committed to source.
+const API_KEY = process.env.NEXT_PUBLIC_STRIPE_KEY ?? "";
 
 interface UserProfileProps {
   userId: string;
@@ -13,31 +16,47 @@ interface UserProfileProps {
 export const UserProfile: React.FC<UserProfileProps> = ({ userId, bio }) => {
   const [query, setQuery] = useState("");
 
-  // 2. XSS sink: rendering unsanitized HTML from a prop
+  // 2. FIXED: sanitize HTML before rendering, instead of trusting it raw.
   const renderBio = () => {
-    return { __html: bio };
+    return { __html: DOMPurify.sanitize(bio) };
   };
 
-  // 3. SQL Injection pattern: string concatenation into a query
+  // 3. FIXED: no manual string concatenation into a query. In a real app,
+  // this would be a parameterized query via your DB client, e.g.:
+  //   db.query("SELECT * FROM users WHERE id = $1", [id])
+  // Shown here as a safe placeholder since this component has no real DB.
   const buildUserQuery = (id: string) => {
-    const sql = "SELECT * FROM users WHERE id = '" + id + "'";
-    return sql;
+    return { text: "SELECT * FROM users WHERE id = $1", values: [id] };
   };
 
-  // 4. Use of eval on user-influenced input
+  // 4. FIXED: removed eval() entirely. Replaced with a safe, explicit
+  // whitelist of supported filter operations instead of arbitrary
+  // code execution.
   const runDynamicFilter = (expression: string) => {
-    // eslint-disable-next-line no-eval
-    return eval(expression);
+    const allowedFilters: Record<string, (q: string) => boolean> = {
+      startsWith: (q) => userId.startsWith(q),
+      contains: (q) => userId.includes(q),
+    };
+    return allowedFilters[expression]?.(query) ?? false;
   };
 
-  // 5. Insecure randomness used in a security-sensitive context
+  // 5. FIXED: use a cryptographically secure random source instead of
+  // Math.random() for anything security-sensitive like session tokens.
   const generateSessionToken = () => {
-    return Math.random().toString(36).substring(2);
+    const bytes = new Uint8Array(16);
+    crypto.getRandomValues(bytes);
+    return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
   };
 
-  // 6. Fetching a user-controlled URL without validation (SSRF-prone pattern)
+  // 6. FIXED: validate/allowlist the URL's host before fetching, instead
+  // of blindly fetching any user-supplied URL (prevents SSRF).
+  const ALLOWED_AVATAR_HOSTS = ["avatars.example.com"];
   const fetchRemoteAvatar = async (url: string) => {
-    const response = await fetch(url);
+    const parsed = new URL(url);
+    if (!ALLOWED_AVATAR_HOSTS.includes(parsed.host)) {
+      throw new Error("Avatar host not allowed");
+    }
+    const response = await fetch(parsed.toString());
     return response.blob();
   };
 
@@ -51,7 +70,6 @@ export const UserProfile: React.FC<UserProfileProps> = ({ userId, bio }) => {
       </button>
       <button onClick={() => runDynamicFilter(query)}>Run Filter</button>
       <p>Session: {generateSessionToken()}</p>
-      <p>API Key in use: {API_KEY}</p>
     </div>
   );
 };
